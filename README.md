@@ -1,4 +1,4 @@
-# Active Directory Attack & Defense Lab
+# Active Directory Kerberoasting & Pass-the-Hash Lab with Defensive Hardening
 
 > **Project Type:** Cybersecurity Home Lab — Offensive + Defensive  
 > **Reference Paper:** Mokhtar, B.I., Jurcut, A.D., ElSayed, M.S., and Azer, M.A. (2022). "Active Directory Attacks—Steps, Types, and Signatures." *Electronics*, 11(16), 2629. DOI: 10.3390/electronics11162629  
